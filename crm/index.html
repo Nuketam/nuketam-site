@@ -196,6 +196,63 @@
   }
   .userbox .signout:hover { background: var(--panel); color: var(--text); }
 
+  /* ---- filter bar ---- */
+  .filterbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    position: sticky; top: 56px; z-index: 4;
+  }
+  .filterbar .label {
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-right: 2px;
+  }
+  .filterbar select {
+    padding: 4px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    outline: none;
+  }
+  .filterbar select.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .filterbar .clear-filter {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+  }
+  .filterbar .clear-filter:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+  .filterbar .clear-filter:disabled { opacity: 0.35; cursor: default; }
+  .filterbar .visible-count {
+    margin-left: auto;
+    color: var(--text-subtle);
+    font-size: 11.5px;
+  }
+  .filterbar .visible-count + .clear-filter { margin-left: 8px; }
+
   /* ---- board ---- */
   .board {
     display: flex;
@@ -527,6 +584,24 @@
       <span class="userbox" id="userbox"><span id="userEmail"></span><button class="signout" id="signoutBtn" title="Sign out">Sign out</button></span>
     </div>
   </div>
+  <div class="filterbar" id="filterbar">
+    <span class="label">Filter</span>
+    <select id="filter-category" title="Filter by category"><option value="">Category: All</option></select>
+    <select id="filter-owner" title="Filter by owner">
+      <option value="">Owner: All</option>
+      <option value="MK">Owner: MK</option>
+      <option value="TG">Owner: TG</option>
+      <option value="__none__">Owner: Unassigned</option>
+    </select>
+    <select id="filter-priority" title="Filter by priority">
+      <option value="">Priority: All</option>
+      <option value="high">Priority: High</option>
+      <option value="medium">Priority: Medium</option>
+      <option value="low">Priority: Low</option>
+    </select>
+    <span class="visible-count" id="visibleCount"></span>
+    <button class="clear-filter" id="clearFilter" disabled>Clear filters</button>
+  </div>
   <div class="board" id="board"></div>
 </div>
 
@@ -681,6 +756,53 @@
   let sb = null;
   let realtimeChannel = null;
   let currentUser = null;
+  let filters = { category: "", owner: "", priority: "" };
+  const FILTER_KEY = "investor_crm_filters_v1";
+
+  // ---------- filters ----------
+  function loadFilters() {
+    try {
+      const raw = localStorage.getItem(FILTER_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") Object.assign(filters, parsed);
+      }
+    } catch (e) {}
+  }
+  function saveFilters() {
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); } catch (e) {}
+  }
+  function anyFilterActive() {
+    return !!(filters.category || filters.owner || filters.priority);
+  }
+  function cardMatchesFilter(c) {
+    if (filters.category && c.category !== filters.category) return false;
+    if (filters.owner) {
+      if (filters.owner === "__none__") {
+        if (c.owner) return false;
+      } else if (c.owner !== filters.owner) return false;
+    }
+    if (filters.priority && c.priority !== filters.priority) return false;
+    return true;
+  }
+  function refreshFilterUI() {
+    const catSel = document.getElementById("filter-category");
+    const ownSel = document.getElementById("filter-owner");
+    const priSel = document.getElementById("filter-priority");
+    // Rebuild category options from current cards
+    const cats = [...new Set(cards.map(c => c.category).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+    const prevCat = filters.category;
+    catSel.innerHTML = '<option value="">Category: All</option>' +
+      cats.map(c => `<option value="${escapeAttr(c)}">${escapeHtml("Category: " + c)}</option>`).join("");
+    if (cats.includes(prevCat)) catSel.value = prevCat;
+    else { filters.category = ""; catSel.value = ""; }
+    ownSel.value = filters.owner;
+    priSel.value = filters.priority;
+    catSel.classList.toggle("active", !!filters.category);
+    ownSel.classList.toggle("active", !!filters.owner);
+    priSel.classList.toggle("active", !!filters.priority);
+    document.getElementById("clearFilter").disabled = !anyFilterActive();
+  }
 
   // ---------- elements ----------
   const authScreen = document.getElementById("authScreen");
@@ -939,16 +1061,19 @@
 
   // ---------- rendering ----------
   function render() {
+    refreshFilterUI();
     const board = document.getElementById("board");
     board.innerHTML = "";
     const term = searchTerm.trim().toLowerCase();
+    let visibleTotal = 0;
 
     STAGES.forEach(stage => {
       const col = document.createElement("section");
       col.className = "column";
       col.dataset.stage = stage.id;
 
-      const cardsHere = cards.filter(c => c.stage === stage.id);
+      const cardsHere = cards.filter(c => c.stage === stage.id && cardMatchesFilter(c));
+      visibleTotal += cardsHere.length;
       const head = document.createElement("div");
       head.className = "col-header";
       head.innerHTML = `
@@ -973,7 +1098,7 @@
       if (!cardsHere.length) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = "Drop cards here";
+        empty.textContent = anyFilterActive() ? "No matches" : "Drop cards here";
         body.appendChild(empty);
       }
 
@@ -982,6 +1107,12 @@
 
     document.getElementById("stats").textContent =
       cards.length === 1 ? "1 investor" : cards.length + " investors";
+    const vc = document.getElementById("visibleCount");
+    if (anyFilterActive() && cards.length) {
+      vc.textContent = `${visibleTotal} of ${cards.length} visible`;
+    } else {
+      vc.textContent = "";
+    }
   }
 
   function renderCard(c, term) {
@@ -1298,6 +1429,29 @@
   // ---------- top bar actions ----------
   document.getElementById("addBtn").addEventListener("click", () => openModal(null, "need"));
   document.getElementById("search").addEventListener("input", (e) => { searchTerm = e.target.value; render(); });
+
+  document.getElementById("filter-category").addEventListener("change", (e) => {
+    filters.category = e.target.value;
+    saveFilters();
+    render();
+  });
+  document.getElementById("filter-owner").addEventListener("change", (e) => {
+    filters.owner = e.target.value;
+    saveFilters();
+    render();
+  });
+  document.getElementById("filter-priority").addEventListener("change", (e) => {
+    filters.priority = e.target.value;
+    saveFilters();
+    render();
+  });
+  document.getElementById("clearFilter").addEventListener("click", () => {
+    filters = { category: "", owner: "", priority: "" };
+    saveFilters();
+    render();
+  });
+
+  loadFilters();
   document.getElementById("exportBtn").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(cards, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
