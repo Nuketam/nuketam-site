@@ -296,6 +296,20 @@
   .pri-dot.high   { background: var(--pri-high); }
   .pri-dot.medium { background: var(--pri-med); }
   .pri-dot.low    { background: var(--pri-low); }
+  .owner-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border);
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+  .owner-badge.mk { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
+  .owner-badge.tg { background: #fce7f3; color: #be185d; border-color: #fbcfe8; }
   .card-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
   .tag {
     font-size: 10.5px;
@@ -560,16 +574,26 @@
           </select>
         </div>
       </div>
-      <div class="field">
-        <label for="f-stage">Stage</label>
-        <select id="f-stage">
-          <option value="need">Need Introducer</option>
-          <option value="intro">Introduced</option>
-          <option value="pitched">Pitched</option>
-          <option value="dili">Diligence</option>
-          <option value="comm">Committed</option>
-          <option value="passed">Passed</option>
-        </select>
+      <div class="row2">
+        <div class="field">
+          <label for="f-owner">Owner</label>
+          <select id="f-owner">
+            <option value="">— unassigned</option>
+            <option value="MK">MK</option>
+            <option value="TG">TG</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-stage">Stage</label>
+          <select id="f-stage">
+            <option value="need">Need Introducer</option>
+            <option value="intro">Introduced</option>
+            <option value="pitched">Pitched</option>
+            <option value="dili">Diligence</option>
+            <option value="comm">Committed</option>
+            <option value="passed">Passed</option>
+          </select>
+        </div>
       </div>
       <div class="field">
         <label for="f-notes">Notes / next action</label>
@@ -596,9 +620,9 @@
       <div class="bulk-help">
         Paste rows from a spreadsheet (TSV) or CSV. First row must be a header.
         Recognised columns: <code>name</code> (required), <code>category</code>, <code>description</code>,
-        <code>location</code>, <code>linkedin</code>, <code>introducer</code>,
+        <code>location</code>, <code>linkedin</code>, <code>introducer</code>, <code>owner</code> (MK/TG),
         <code>priority</code> (high/medium/low), <code>stage</code> (need/intro/pitched/dili/comm/passed), <code>notes</code>.
-        Unknown columns are ignored. New rows default to stage <b>Need Introducer</b>.
+        Unknown columns are ignored. Missing <code>owner</code> defaults to you. New rows default to stage <b>Need Introducer</b>.
       </div>
       <div class="field">
         <label for="bulkText">Paste data</label>
@@ -633,6 +657,11 @@
     "mate.kun@growthkitchen.co",
     "tom.gatz@growthkitchen.co",
   ];
+  const OWNER_INITIALS    = {
+    "mate.kun@growthkitchen.co": "MK",
+    "tom.gatz@growthkitchen.co": "TG",
+  };
+  const OWNERS            = ["MK", "TG"];
   const STALE_DAYS        = 14;
   // =====================================================================
 
@@ -835,6 +864,7 @@
       location:    row.location || "",
       linkedin:    row.linkedin || "",
       introducer:  row.introducer || "",
+      owner:       OWNERS.includes(row.owner) ? row.owner : "",
       priority:    ["high","medium","low"].includes(row.priority) ? row.priority : "medium",
       stage:       STAGE_IDS.includes(row.stage) ? row.stage : "need",
       notes:       row.notes || "",
@@ -966,7 +996,7 @@
 
     const matches =
       !term ||
-      [c.name, c.category, c.description, c.location, c.notes, c.introducer]
+      [c.name, c.category, c.description, c.location, c.notes, c.introducer, c.owner]
         .join(" ")
         .toLowerCase()
         .includes(term);
@@ -990,8 +1020,12 @@
     const stampClass = isStale ? "stamp stale" : "stamp";
     const stampLabel = c.updated_at ? relativeTime(c.updated_at) : "";
 
+    const ownerBadgeHtml = c.owner
+      ? `<span class="owner-badge ${escapeAttr(c.owner.toLowerCase())}" title="Owner: ${escapeAttr(c.owner)}">${escapeHtml(c.owner)}</span>`
+      : "";
+
     el.innerHTML = `
-      <h3 class="card-name"><span class="pri-dot ${escapeAttr(c.priority)}" title="Priority: ${escapeAttr(c.priority)}"></span>${escapeHtml(c.name || "Untitled")}</h3>
+      <h3 class="card-name"><span class="pri-dot ${escapeAttr(c.priority)}" title="Priority: ${escapeAttr(c.priority)}"></span>${ownerBadgeHtml}${escapeHtml(c.name || "Untitled")}</h3>
       ${tags.length ? `<div class="card-meta">${tags.join("")}</div>` : ""}
       ${c.description ? `<p class="card-desc">${escapeHtml(c.description)}</p>` : ""}
       <div class="card-foot">
@@ -1062,6 +1096,7 @@
     description: document.getElementById("f-description"),
     linkedin: document.getElementById("f-linkedin"),
     introducer: document.getElementById("f-introducer"),
+    owner: document.getElementById("f-owner"),
     priority: document.getElementById("f-priority"),
     stage: document.getElementById("f-stage"),
     notes: document.getElementById("f-notes"),
@@ -1074,6 +1109,7 @@
   function openModal(id, defaultStage) {
     editingId = id;
     const c = id ? cards.find(x => x.id === id) : null;
+    const myInitials = currentUser ? (OWNER_INITIALS[currentUser.email.toLowerCase()] || "") : "";
     if (c) {
       m.title.textContent = "Edit investor";
       m.name.value        = c.name || "";
@@ -1082,6 +1118,7 @@
       m.description.value = c.description || "";
       m.linkedin.value    = c.linkedin || "";
       m.introducer.value  = c.introducer || "";
+      m.owner.value       = OWNERS.includes(c.owner) ? c.owner : "";
       m.priority.value    = c.priority || "medium";
       m.stage.value       = c.stage || "need";
       m.notes.value       = c.notes || "";
@@ -1090,6 +1127,7 @@
       m.title.textContent = "Add investor";
       m.name.value = m.category.value = m.location.value = "";
       m.description.value = m.linkedin.value = m.introducer.value = m.notes.value = "";
+      m.owner.value = myInitials;
       m.priority.value = "medium";
       m.stage.value = defaultStage || "need";
       m.delete.style.display = "none";
@@ -1127,6 +1165,7 @@
       description: m.description.value.trim(),
       linkedin,
       introducer:  m.introducer.value.trim(),
+      owner:       OWNERS.includes(m.owner.value) ? m.owner.value : null,
       priority:    m.priority.value,
       stage:       m.stage.value,
       notes:       m.notes.value.trim(),
@@ -1197,11 +1236,12 @@
     const delim = headerLine.includes("\t") ? "\t" : ",";
     const headers = parseDelimLine(headerLine, delim).map(h => h.trim().toLowerCase());
 
-    const known = ["name","category","description","location","linkedin","introducer","priority","stage","notes"];
+    const known = ["name","category","description","location","linkedin","introducer","owner","priority","stage","notes"];
     const idx = {};
     known.forEach(k => { idx[k] = headers.indexOf(k); });
     if (idx.name < 0) return [];
 
+    const myInitials = currentUser ? (OWNER_INITIALS[currentUser.email.toLowerCase()] || "") : "";
     const out = [];
     for (let i = 1; i < lines.length; i++) {
       const cells = parseDelimLine(lines[i], delim);
@@ -1214,6 +1254,9 @@
       let priority = (idx.priority >= 0 ? cells[idx.priority] || "" : "").trim().toLowerCase();
       if (!["high","medium","low"].includes(priority)) priority = "medium";
 
+      let owner = (idx.owner >= 0 ? cells[idx.owner] || "" : "").trim().toUpperCase();
+      if (!OWNERS.includes(owner)) owner = myInitials; // default to current user when missing/invalid
+
       let linkedin = (idx.linkedin >= 0 ? cells[idx.linkedin] || "" : "").trim();
       if (linkedin && !/^https?:\/\//i.test(linkedin)) linkedin = "https://" + linkedin;
 
@@ -1224,6 +1267,7 @@
         location:    (idx.location    >= 0 ? cells[idx.location]    || "" : "").trim(),
         linkedin,
         introducer:  (idx.introducer  >= 0 ? cells[idx.introducer]  || "" : "").trim(),
+        owner:       owner || null,
         priority,
         stage,
         notes:       (idx.notes       >= 0 ? cells[idx.notes]       || "" : "").trim(),
